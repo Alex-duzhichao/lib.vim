@@ -22,7 +22,7 @@ function! keymap#SaveMappings(keys, mode, global) abort
                                         \ 'mode'     : a:mode,
                                         \ }
 
-            call Restore_mappings({l:key : buf_local_map})
+            call keymap#RestoreMappings({l:key : buf_local_map})
             sil! exe a:mode.'unmap '.l:key
         endfor
 
