@@ -10,6 +10,7 @@ function! path#ConvertToCygPath(path)
     let l:path = substitute(l:path, 'C:', '/cygdrive/c', "g") 
     let l:path = substitute(l:path, 'D:', '/cygdrive/d', "g") 
     let l:path = substitute(l:path, 'E:', '/cygdrive/e', "g") 
+    let l:path = substitute(l:path, 'F:', '/cygdrive/f', "g") 
     let l:path = substitute(l:path, '\', '/', "g") 
     return l:path
 endfunction
@@ -21,7 +22,22 @@ function! path#ConvertToWinPath(path)
     let l:path = substitute(l:path, '/cygdrive/c', 'C:', "g") 
     let l:path = substitute(l:path, '/cygdrive/d', 'D:', "g") 
     let l:path = substitute(l:path, '/cygdrive/e', 'E:', "g") 
+    let l:path = substitute(l:path, '/cygdrive/f', 'F:', "g") 
+    let l:path = substitute(l:path, '\', '/', "g") 
     return l:path
+endfunction
+
+"----------------------------------------------------------------
+" Join
+function! path#Join(...)
+    if a:0 == 0 | return '' | endif
+    let sp = '/'
+    if g:iswindows
+        if exists('+shellslash')
+            let sp = (&shellslash ? '/' : '\')
+        endif
+    endif
+    return join(a:000, sp)
 endfunction
 
 "----------------------------------------------------------------
@@ -39,14 +55,16 @@ function! path#Rsync(localPath, user, remoteAddr, remotePort, remotePath, proxyA
     let cmd = "rsync -avzuh "
     if(filereadable(a:identityFile))
         let identity = path#ConvertToCygPath(a:identityFile)
-        let fmt = " -e 'ssh -i %s' "
         if(!empty(a:proxyAddr))
-            let fmt = " -e 'ssh -i %s -o \"ProxyCommand=nc -X connect -x %s \%h \%p\" '"
+            let fmt = " -e 'ssh -i %s -p %d -o \"ProxyCommand=nc -X connect -x %s \\%%h \\%%p\" ' "
+            let cmd = cmd . printf(fmt, identity, a:remotePort, a:proxyAddr)
+        else
+            let fmt = " -e 'ssh -i %s -p %d' "
+            let cmd = cmd . printf(fmt, a:remotePort, identity)
         endif
-        let cmd = cmd . printf(fmt, identity, proxyAddr)
     endif
 
-    let cmd = cmd . printf("%s -p %d %s@%s:%s", path#ConvertToCygPath(a:localPath), a:remotePort, a:user, a:remoteAddr, a:remotePath)
+    let cmd = cmd . printf("%s %s@%s:%s", path#ConvertToCygPath(a:localPath), a:user, a:remoteAddr, a:remotePath)
     call misc#RunCommand(cmd)
     return 0
 endfunction

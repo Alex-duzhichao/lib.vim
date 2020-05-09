@@ -60,6 +60,7 @@ endfunction
 "----------------------------------------------------------------
 " Shell command
 function! misc#RunCommandInWindow(cmdline)
+    call misc#Log(a:cmdline)
     botright new
 
     setlocal buftype=nofile
@@ -82,7 +83,8 @@ endfunction
 "----------------------------------------------------------------
 "RunCommand
 function! misc#RunCommand(cmdline)
-    let output = system(cmdline)
+    call misc#Log(a:cmdline)
+    let output = system(a:cmdline)
     call misc#Log(output)
 endfunction
 
@@ -90,10 +92,6 @@ endfunction
 function! misc#Zip(path, outputPath, exclude)
     if(!ingo#fs#path#Exists(a:path))
         echohl WarningMsg | echo a:path . ' not exists' | echohl None
-        return -1
-    endif
-    if(ingo#fs#path#Exists(a:outputPath))
-        echohl WarningMsg | echo a:outputPath . ' exists' | echohl None
         return -1
     endif
 
@@ -108,6 +106,8 @@ endfunction
 
 "----------------------------------------------------------------
 function! misc#DeleteCtagsAndCscopeFiles(path)
+    silent execute "cs kill -1"
+    return
     let path = path#ConvertToWinPath(a:path)
     let ctags_file = path#ConvertToWinPath(ingo#fs#path#Combine(path, 'tags'))
     let cscope_file = path#ConvertToWinPath(ingo#fs#path#Combine(path, 'cscope.files'))
@@ -116,12 +116,11 @@ function! misc#DeleteCtagsAndCscopeFiles(path)
         call misc#CheckResult(delete(ctags_file), "file to delete ctags")
     endif
 
-    silent execute "cs kill -1"
     if filereadable(cscope_file)
         call misc#CheckResult(delete(cscope_file), "file to delete cscope file")
     endif
     if filereadable(cscope_out)
-        call misc#CheckResult(delete(cscope_output), "file to delete cscope out")
+        call misc#CheckResult(delete(cscope_out), "file to delete cscope out")
     endif
 endfunction
 
@@ -132,20 +131,21 @@ function! misc#DoCtagsAndCscope(path, type, options)
     let win_path = path#ConvertToWinPath(a:path)
     execute ":cd ". win_path
     call misc#DeleteCtagsAndCscopeFiles(win_path)
-    let l:findPara = ''
+    let l:findPara = " -path '*tags*' -prune -o"
     let l:ctagsPara = ''
     if a:type ==# 'cpp'
         let l:ctagsPara =  ' --c++-kinds=+p+l+x --fields=+iaS --extras=+q -L '
         if(get(a:options, 'ExcludeBoost', 1))
             let l:findPara = " -path '*boost*' -prune -o"
         endif
-        let l:findPara = l:findPara." -regex \".*\\.\\(h\\|c\\|cpp\\|cc\\|hpp\\)\" -print"
+        let l:findPara = l:findPara." -regex \".*\\.\\(h\\|H\\|c\\|cpp\\|cc\\|hpp\\)\" -print"
     elseif a:type ==# 'go'
-        let l:ctagsPara = ' --fields=+afmikKlnsStzZ --extras=+q -L '
-        if(get(a:options, 'ExcludeVender', 1))
-            let l:findPara = " -path '*vendor*' -prune -o"
+        " let l:ctagsPara = ' --fields=+afmikKlnsStzZ --go-kinds=+p+f+c+t+v+s+i+m+M+u --extras=+q -L '
+        let l:ctagsPara = ' --go-kinds=+p+f+c+t+v+s+i+m+M+u -L '
+        if(get(a:options, 'ExcludeVendor', 1))
+            let l:findPara = " -path '*vendor*' -prune -o -name '*_test.go' -prune -o -name '*mock*' -prune -o -name '*integration*' -prune -o "
         endif
-        let l:findPara = l:findPara." -name '*_test.go' -o -name '*.go' -print"
+        let l:findPara = l:findPara." -name '*.go' -print"
     elseif a:type ==# 'js'
         let l:ctagsPara = ' --fields=+nksSaf -V --language-force=javascript --javascript-kinds=vCcgpmf -L '
         if(get(a:options, 'ExcludeModules', 1))
@@ -160,18 +160,23 @@ function! misc#DoCtagsAndCscope(path, type, options)
         let l:findPara = l:findPara." -name '*.py' -print"
     endif
     let cmd = misc#BuildCommand(g:find_bin, cyg_path, l:findPara)
+    call misc#Log(cmd)
 
     let ret = path#ConvertToWinPath(system(cmd))
     let fileList = split(ret)
+    call misc#Log(fileList)
     " call append(line(".")-1, ret)
     let cscopefile = ingo#fs#path#Combine(win_path, "cscope.files")
     call writefile(fileList, cscopefile, "b")
 
     let l:ctagsCmd = misc#BuildCommand(g:ctags_bin, l:ctagsPara, cscopefile)
+    call misc#Log(l:ctagsCmd)
     let l:cscopeCmd = misc#BuildCommand(g:cscope_bin, " -Rbk -s " , win_path)
 
     call system(l:ctagsCmd)
     call system(l:cscopeCmd)
+    " let ctagsfile = ingo#fs#path#Combine(win_path, "tags")
+    " let &tags=ctagsfile
     " silent execute "normal :"
     if filereadable("cscope.out")
         silent execute "cs add cscope.out"
@@ -179,13 +184,25 @@ function! misc#DoCtagsAndCscope(path, type, options)
     execute ":cd ".current_dir
     " :set tags+=$VIMPROJ/vimlib/tags,$VIMPROJ/vimlib/linux/tags,$VIMPROJ/vimlib/unix_network_programming/tags
     " :set path+=$VIMPROJ/vimlib/cpp_src,$VIMPROJ/vimlib/linux/include,$VIMPROJ/vimlib/linux/include/sys/,$VIMPROJ/vimlib/unix_network_programming/
+    " for ctrlsf
+    let allFileCmd = misc#BuildCommand(g:find_bin, cyg_path, '-type f')
+    call misc#Log(allFileCmd)
+    let allFileList = split(path#ConvertToWinPath(system(allFileCmd)))
+    let ignoreList = ingo#collections#differences#Get(allFileList, fileList)[0]
+    call misc#Log(ignoreList)
+    call misc#Log(win_path)
+    let ignoreList = map(ignoreList, {idx, val -> substitute(val, win_path . '/', '', 'g')})
+    call misc#Log(ignoreList)
+    let ignorefile = ingo#fs#path#Combine(win_path, ".ignore")
+    call writefile(ignoreList, ignorefile, "b")
 endfunction
 
 "-------------------------------------------------------------------------------------------------
 function! misc#AstyleFile(file)
-    let astyle_cmd = 'astyle.exe -A1Lfpjk3S --mode=c --ascii -n '
-    let cmd = misc#BuildCommand(astyle_cmd, a:file)
-    silent execute cmd
+    let astyle_args = ' -A1Lfpjk3S --mode=c --ascii -n '
+    let cmd = misc#BuildCommand(g:astyle_bin, astyle_args, a:file)
+    call system(cmd)
+    " silent execute cmd
     silent exec 'normal :%s/\r//g <cr>'
 endfunction
 
@@ -199,6 +216,21 @@ function! misc#AstyleAllInFile(file)
         " exec 'normal :%s/\r//g <cr>'
     endfor
 endfunction
+
+"-------------------------------------------------------------------------------------------------
+function! misc#GetVisualSelection()
+    " Why is this not a built-in Vim script function?!
+    let [line_start, column_start] = getpos("'<")[1:2]
+    let [line_end, column_end] = getpos("'>")[1:2]
+    let lines = getline(line_start, line_end)
+    if len(lines) == 0
+        return ''
+    endif
+    let lines[-1] = lines[-1][: column_end - (&selection == 'inclusive' ? 1 : 2)]
+    let lines[0] = lines[0][column_start - 1:]
+    return join(lines, "\n")
+endfunction
+
 " vim:set ft=vim et sw=4 sts=4:
 
 
